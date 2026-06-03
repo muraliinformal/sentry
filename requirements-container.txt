@@ -1,6 +1,12 @@
 # Copyright 2026 Sentry Object Intelligence contributors
 # SPDX-License-Identifier: Apache-2.0
 
+# Lean container runtime.
+#
+# InsightFace buffalo_l is the face recognizer used by the app. Extra fallback
+# recognizers are intentionally not part of the runtime because they add size
+# without improving the current matching path.
+
 streamlit==1.50.0
 ultralytics==8.4.60
 opencv-python-headless==4.13.0.92

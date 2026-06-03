@@ -5,9 +5,8 @@ Apache License, Version 2.0. See `LICENSE`.
 
 Production-ready face and vehicle tracking for RTSP streams, local videos, and
 static images. The pipeline uses configurable YOLO weights, InsightFace
-`buffalo_l` embeddings for face recognition, DeepFace fallback verification,
-EasyOCR registration extraction, HSV vehicle color classification, and SQLite
-persistence.
+`buffalo_l` embeddings for face recognition, EasyOCR registration extraction,
+HSV vehicle color classification, and SQLite persistence.
 
 ## Runtime Structure
 
@@ -30,8 +29,8 @@ uses local `.pt` files from `models/` for both detector slots. If only one
 
 > **Model redistribution note:** this public repository intentionally does not
 > include pretrained model weights. Place your own licensed model files under
-> `models/`, `insightface_models/`, and/or `.deepface_home/` before running or
-> building a fully self-contained image. See `THIRD_PARTY_NOTICES.md` for
+> `models/` and `insightface_models/` before running or building a fully
+> self-contained image. See `THIRD_PARTY_NOTICES.md` for
 > dependency, model, and biometric/privacy notices.
 
 ```bash
@@ -39,13 +38,12 @@ export SENTRY_VEHICLE_MODEL_PATH="/absolute/path/to/vehicle-detector.pt"
 export SENTRY_FACE_MODEL_PATH="/absolute/path/to/face-detector.pt"
 export SENTRY_INSIGHTFACE_MODEL_NAME="buffalo_l"
 export SENTRY_INSIGHTFACE_ROOT="$HOME/.insightface"
-export SENTRY_DEEPFACE_MODEL_NAME="VGG-Face"
 ```
 
 If `buffalo_l` exists under `$HOME/.insightface/models/buffalo_l`, the app uses
 InsightFace automatically for face matching. If InsightFace is unavailable or
-cannot extract an embedding, it falls back to DeepFace. If
-`SENTRY_DEEPFACE_MODEL_NAME` is not set, the fallback model is `VGG-Face`.
+cannot extract an embedding, the face remains in review instead of being
+matched by a weaker fallback.
 
 By default, new crop images are stored as compressed JPEG BLOBs in SQLite and
 not written to `dataset/`. Set `PipelineConfig(keep_image_files=True)` if you
@@ -54,7 +52,7 @@ also want on-disk crop files for debugging or external review.
 ## Install
 
 ```bash
-pip install streamlit ultralytics opencv-python numpy easyocr insightface onnxruntime deepface
+pip install -r requirements.txt
 ```
 
 ## Run Dashboard
@@ -71,7 +69,6 @@ import pipeline
 config = pipeline.PipelineConfig.with_model_paths(
     vehicle_model_path="/absolute/path/to/vehicle-detector.pt",
     face_model_path="/absolute/path/to/face-detector.pt",
-    deepface_model_name="VGG-Face",
 )
 
 summary = pipeline.run_pipeline(
@@ -114,14 +111,19 @@ python -m py_compile pipeline.py app.py
 
 ## Container build and portable archive
 
-The `Containerfile` can package Python dependencies plus any locally supplied
-detector, InsightFace, and DeepFace model assets from `models/`,
-`insightface_models/`, and `.deepface_home/.deepface/weights/`. Runtime data is
-intentionally kept outside the image through `/app/data`.
+The `Containerfile` is optimized for size. It packages Python runtime
+dependencies from `requirements-container.txt` plus any locally supplied YOLO
+detector and InsightFace model assets from `models/` and
+`insightface_models/`. Runtime data is intentionally kept outside the image
+through `/app/data`.
+
+InsightFace `buffalo_l` is the face recognizer used by the app. Extra fallback
+recognizers and legacy local model caches are not part of the runtime image.
 
 The `.containerignore`/`.dockerignore` files exclude `dataset/`,
-`tracking_database.db`, generated archives, runtime caches, and common
-image/video extensions so captured media is not baked into the container.
+`tracking_database.db`, generated archives, runtime caches, legacy local model
+caches, and common image/video extensions so captured media and heavyweight
+local caches are not baked into the container.
 
 Before building a deployable image, add your own licensed model files locally,
 for example:
@@ -132,8 +134,6 @@ models/
   yolo26x-face.pt
 insightface_models/
   models/buffalo_l/*.onnx
-.deepface_home/
-  .deepface/weights/vgg_face_weights.h5
 ```
 
 ```bash

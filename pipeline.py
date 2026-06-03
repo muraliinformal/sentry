@@ -38,21 +38,17 @@ except Exception:  # pragma: no cover - runtime dependency
 BASE_DIR = Path(__file__).resolve().parent
 DATASET_DIR = Path(os.environ.get("SENTRY_DATASET_DIR", str(BASE_DIR / "dataset"))).expanduser()
 MODELS_DIR = BASE_DIR / "models"
-DEEPFACE_HOME_DIR = BASE_DIR / ".deepface_home"
 MPLCONFIG_DIR = BASE_DIR / ".matplotlib_cache"
 DB_PATH = Path(os.environ.get("SENTRY_DB_PATH", str(BASE_DIR / "tracking_database.db"))).expanduser()
 TABLE_NAME = "tracked_entities"
 DETECTION_EVENTS_TABLE = "detection_events"
 UNKNOWN_REGISTRATION = "UNKNOWN_REG"
-DEFAULT_DEEPFACE_MODEL_NAME = "VGG-Face"
 DEFAULT_INSIGHTFACE_MODEL_NAME = "buffalo_l"
 
-os.environ.setdefault("DEEPFACE_HOME", str(DEEPFACE_HOME_DIR))
 os.environ.setdefault("MPLCONFIGDIR", str(MPLCONFIG_DIR))
 
 VEHICLE_MODEL_ENV = "SENTRY_VEHICLE_MODEL_PATH"
 FACE_MODEL_ENV = "SENTRY_FACE_MODEL_PATH"
-DEEPFACE_MODEL_ENV = "SENTRY_DEEPFACE_MODEL_NAME"
 INSIGHTFACE_MODEL_ENV = "SENTRY_INSIGHTFACE_MODEL_NAME"
 INSIGHTFACE_ROOT_ENV = "SENTRY_INSIGHTFACE_ROOT"
 INSIGHTFACE_ENABLED_ENV = "SENTRY_INSIGHTFACE_ENABLED"
@@ -168,24 +164,12 @@ class PipelineConfig:
     dataset_dir: Path = field(default_factory=lambda: DATASET_DIR)
     vehicle_model_path: Path | None = field(default_factory=lambda: discover_default_model_path(role="vehicle"))
     face_model_path: Path | None = field(default_factory=lambda: discover_default_model_path(role="face"))
-    deepface_model_name: str = field(
-        default_factory=lambda: os.environ.get(DEEPFACE_MODEL_ENV, DEFAULT_DEEPFACE_MODEL_NAME).strip()
-        or DEFAULT_DEEPFACE_MODEL_NAME
-    )
     crop_padding_pixels: int = 18
     live_skip_frames: int = 12
     local_skip_frames: int = 3
     vehicle_confidence: float = 0.35
     face_confidence: float = 0.45
-    face_distance_metric: str = "cosine"
-    deepface_detector_backend: str = "skip"
-    deepface_enforce_detection: bool = False
-    face_match_threshold_multiplier: float = 0.92
-    face_match_max_distance: float = 0.45
-    face_match_ambiguity_margin: float = 0.06
     face_match_max_exemplars_per_name: int = 4
-    face_match_min_name_votes: int = 2
-    face_match_vote_max_average_distance: float = 0.59
     insightface_enabled: bool = field(default_factory=lambda: _env_bool(INSIGHTFACE_ENABLED_ENV, True))
     insightface_model_name: str = field(
         default_factory=lambda: os.environ.get(INSIGHTFACE_MODEL_ENV, DEFAULT_INSIGHTFACE_MODEL_NAME).strip()
@@ -203,9 +187,6 @@ class PipelineConfig:
     reconnect_delay_seconds: float = 3.0
     max_timestamps_per_entity: int = 6
     deduplicate_unknown_registrations: bool = False
-    face_visual_match_enabled: bool = True
-    face_visual_histogram_threshold: float = 0.85
-    face_visual_mean_difference_threshold: float = 0.12
 
     @classmethod
     def with_model_paths(
@@ -213,7 +194,6 @@ class PipelineConfig:
         *,
         vehicle_model_path: str | Path | None,
         face_model_path: str | Path | None,
-        deepface_model_name: str | None = None,
     ) -> "PipelineConfig":
         """Build a config from UI/API supplied model paths."""
 
@@ -224,12 +204,6 @@ class PipelineConfig:
             face_model_path=Path(face_model_path).expanduser()
             if face_model_path
             else discover_default_model_path(role="face"),
-            deepface_model_name=(
-                deepface_model_name
-                if deepface_model_name is not None
-                else os.environ.get(DEEPFACE_MODEL_ENV, DEFAULT_DEEPFACE_MODEL_NAME)
-            ).strip()
-            or DEFAULT_DEEPFACE_MODEL_NAME,
         )
 
 
@@ -250,15 +224,13 @@ class StoredCrop:
 
 
 class ModelManager:
-    """Thread-safe lazy loader/cache for YOLO, EasyOCR, InsightFace, and DeepFace."""
+    """Thread-safe lazy loader/cache for YOLO, EasyOCR, and InsightFace."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._yolo_models: dict[Path, Any] = {}
         self._ocr_readers: dict[tuple[tuple[str, ...], bool], Any] = {}
         self._insightface_apps: dict[tuple[str, Path], Any] = {}
-        self._deepface: Any = None
-        self._deepface_models_warmed: set[str] = set()
 
     def yolo(self, model_path: Path | None, *, role: str) -> Any:
         if model_path is None:
@@ -342,29 +314,6 @@ class ModelManager:
                 raise PipelineRuntimeError(f"InsightFace model {model_name!r} did not load a recognizer.")
             self._insightface_apps[key] = app
             return app
-
-    def deepface(self, config: PipelineConfig) -> Any:
-        model_name = config.deepface_model_name.strip()
-        if not model_name:
-            raise PipelineRuntimeError("Missing DeepFace model name.")
-
-        with self._lock:
-            if self._deepface is None:
-                try:
-                    from deepface import DeepFace  # type: ignore
-                except Exception as exc:  # pragma: no cover - dependency-specific
-                    raise ImportError("Missing dependency 'deepface'. Install it before inference.") from exc
-                self._deepface = DeepFace
-
-            if model_name not in self._deepface_models_warmed:
-                try:  # pragma: no cover - library-version specific
-                    self._deepface.build_model(model_name)
-                except Exception as exc:
-                    LOGGER.debug("DeepFace warm-up skipped for %s: %s", model_name, exc)
-                self._deepface_models_warmed.add(model_name)
-
-            return self._deepface
-
 
 DEFAULT_MODEL_MANAGER = ModelManager()
 
@@ -674,7 +623,7 @@ def _fetch_face_match_candidates(
 
     rows = conn.execute(
         f"""
-        SELECT id, custom_name, image_path, face_embedding
+        SELECT id, custom_name, image_path, image_blob, face_embedding
         FROM {TABLE_NAME}
         WHERE category = 'Face'
           {exclude_clause}
@@ -701,84 +650,6 @@ def _fetch_face_match_candidates(
         selected.append(row)
         per_name_counts[name] = count + 1
     return selected
-
-
-def _select_confident_face_match(
-    candidates: list[dict[str, Any]],
-    config: PipelineConfig,
-) -> dict[str, Any] | None:
-    """Pick a face match using strict single-match rules or same-name voting."""
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda item: float(item["distance"]))
-
-    by_name: dict[str, list[dict[str, Any]]] = {}
-    for candidate in candidates:
-        by_name.setdefault(_name_key(str(candidate["custom_name"])), []).append(candidate)
-
-    min_votes = max(2, int(config.face_match_min_name_votes))
-    voted_matches: list[dict[str, Any]] = []
-    for name, name_candidates in by_name.items():
-        name_candidates.sort(key=lambda item: float(item["distance"]))
-        if len(name_candidates) < min_votes:
-            continue
-        vote_slice = name_candidates[:min_votes]
-        average_distance = sum(float(item["distance"]) for item in vote_slice) / min_votes
-        if average_distance > config.face_match_vote_max_average_distance:
-            continue
-        voted_matches.append(
-            {
-                **name_candidates[0],
-                "vote_count": min_votes,
-                "vote_average_distance": average_distance,
-                "custom_name": str(name_candidates[0]["custom_name"]),
-            }
-        )
-
-    if voted_matches:
-        voted_matches.sort(key=lambda item: float(item["vote_average_distance"]))
-        best_vote = voted_matches[0]
-        for contender in voted_matches[1:]:
-            if _name_key(str(contender["custom_name"])) == _name_key(str(best_vote["custom_name"])):
-                continue
-            distance_gap = float(contender["vote_average_distance"]) - float(best_vote["vote_average_distance"])
-            if distance_gap < config.face_match_ambiguity_margin:
-                LOGGER.info(
-                    "Ambiguous voted face match rejected: best=%s %.4f contender=%s %.4f",
-                    best_vote["custom_name"],
-                    best_vote["vote_average_distance"],
-                    contender["custom_name"],
-                    contender["vote_average_distance"],
-                )
-                return None
-        return best_vote
-
-    best = candidates[0]
-    for candidate in candidates[1:]:
-        if _name_key(str(candidate["custom_name"])) == _name_key(str(best["custom_name"])):
-            continue
-        distance_gap = float(candidate["distance"]) - float(best["distance"])
-        if distance_gap < config.face_match_ambiguity_margin:
-            LOGGER.info(
-                "Ambiguous face match rejected: best=%s %.4f contender=%s %.4f",
-                best["custom_name"],
-                best["distance"],
-                candidate["custom_name"],
-                candidate["distance"],
-            )
-            return None
-    if float(best["distance"]) > config.face_match_max_distance:
-        LOGGER.debug(
-            "DeepFace match rejected by absolute cutoff for row %s: distance=%.4f max=%.4f",
-            best["id"],
-            best["distance"],
-            config.face_match_max_distance,
-        )
-        return None
-
-    return best
 
 
 def suggest_named_face_for_entry(
@@ -810,13 +681,6 @@ def suggest_named_face_for_entry(
         if source_crop is None:
             return None
 
-        candidates = _fetch_face_match_candidates(
-            conn,
-            config,
-            exclude_entry_id=entry_id,
-            limit_per_name=False,
-        )
-
         insightface_match = _find_matching_face_by_insightface(
             conn,
             source_crop,
@@ -829,50 +693,7 @@ def suggest_named_face_for_entry(
             conn.commit()
             return insightface_match
 
-    try:
-        deepface = DEFAULT_MODEL_MANAGER.deepface(config)
-    except Exception:
-        return None
-
-    matches: list[dict[str, Any]] = []
-    for candidate in candidates:
-        candidate_crop = _read_crop_from_row(candidate)
-        if candidate_crop is None:
-            continue
-        verify_kwargs = {
-            "img1_path": source_crop,
-            "img2_path": candidate_crop,
-            "model_name": config.deepface_model_name,
-            "distance_metric": config.face_distance_metric,
-            "enforce_detection": config.deepface_enforce_detection,
-            "detector_backend": config.deepface_detector_backend,
-        }
-        try:
-            try:
-                result = deepface.verify(**verify_kwargs, silent=True)
-            except TypeError:
-                result = deepface.verify(**verify_kwargs)
-        except Exception:
-            continue
-        if not isinstance(result, dict) or not bool(result.get("verified")):
-            continue
-        try:
-            distance = float(result["distance"])
-            threshold = float(result["threshold"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if distance > threshold * config.face_match_threshold_multiplier:
-            continue
-        matches.append(
-            {
-                "entity_id": int(candidate["id"]),
-                "custom_name": str(candidate["custom_name"]),
-                "distance": distance,
-                "threshold": threshold,
-            }
-        )
-
-    return _select_confident_face_match(matches, config)
+    return None
 
 
 def update_entry(
@@ -1592,77 +1413,6 @@ def _uses_general_person_detector_for_faces(config: PipelineConfig) -> bool:
     return "face" not in Path(face_path).stem.lower()
 
 
-def _visual_face_match_score(crop_a: Any, crop_b: Any) -> tuple[float, float] | None:
-    """Return HSV histogram correlation and normalized pixel difference."""
-
-    if cv2 is None or np is None or crop_a is None or crop_b is None:
-        return None
-    try:
-        resized_a = cv2.resize(crop_a, (96, 96), interpolation=cv2.INTER_AREA)
-        resized_b = cv2.resize(crop_b, (96, 96), interpolation=cv2.INTER_AREA)
-
-        hsv_a = cv2.cvtColor(resized_a, cv2.COLOR_BGR2HSV)
-        hsv_b = cv2.cvtColor(resized_b, cv2.COLOR_BGR2HSV)
-        hist_a = cv2.calcHist([hsv_a], [0, 1], None, [32, 16], [0, 180, 0, 256])
-        hist_b = cv2.calcHist([hsv_b], [0, 1], None, [32, 16], [0, 180, 0, 256])
-        cv2.normalize(hist_a, hist_a, 0, 1, cv2.NORM_MINMAX)
-        cv2.normalize(hist_b, hist_b, 0, 1, cv2.NORM_MINMAX)
-        histogram_score = float(cv2.compareHist(hist_a, hist_b, cv2.HISTCMP_CORREL))
-
-        gray_a = cv2.cvtColor(resized_a, cv2.COLOR_BGR2GRAY)
-        gray_b = cv2.cvtColor(resized_b, cv2.COLOR_BGR2GRAY)
-        mean_difference = float(np.mean(np.abs(gray_a.astype("float32") - gray_b.astype("float32"))) / 255.0)
-    except Exception:
-        return None
-    return histogram_score, mean_difference
-
-
-def _find_matching_face_by_visual_similarity(
-    conn: sqlite3.Connection,
-    face_crop: Any,
-    config: PipelineConfig,
-) -> int | None:
-    if not config.face_visual_match_enabled or cv2 is None:
-        return None
-
-    rows = conn.execute(
-        f"""
-        SELECT id, image_path, image_blob
-        FROM {TABLE_NAME}
-        WHERE category = 'Face'
-        ORDER BY
-            CASE
-                WHEN custom_name IS NOT NULL
-                 AND TRIM(custom_name) != ''
-                 AND custom_name != 'Unidentified Face'
-                 AND custom_name NOT GLOB 'Face_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]'
-                THEN 0 ELSE 1
-            END,
-            id ASC
-        """
-    ).fetchall()
-    best_row_id: int | None = None
-    best_score: tuple[float, float] | None = None
-
-    for row in rows:
-        existing_crop = _read_crop_from_row(row)
-        if existing_crop is None:
-            continue
-        score = _visual_face_match_score(face_crop, existing_crop)
-        if score is None:
-            continue
-        histogram_score, mean_difference = score
-        if histogram_score < config.face_visual_histogram_threshold:
-            continue
-        if mean_difference > config.face_visual_mean_difference_threshold:
-            continue
-        if best_score is None or (histogram_score, -mean_difference) > (best_score[0], -best_score[1]):
-            best_score = score
-            best_row_id = int(row["id"])
-
-    return best_row_id
-
-
 def _select_insightface_match(
     candidates: list[dict[str, Any]],
     config: PipelineConfig,
@@ -1703,7 +1453,7 @@ def _find_matching_face_by_insightface(
     try:
         source_embedding = _extract_insightface_embedding(face_crop, model_manager, config)
     except Exception as exc:
-        LOGGER.warning("InsightFace unavailable; falling back to DeepFace: %s", exc)
+        LOGGER.warning("InsightFace unavailable; leaving face for review: %s", exc)
         return None
     if source_embedding is None:
         LOGGER.debug("InsightFace could not extract an embedding from the source crop.")
@@ -1754,76 +1504,8 @@ def _find_matching_face(
         )
         return int(insightface_match["id"])
 
-    rows = _fetch_face_match_candidates(conn, config)
-    if not rows:
-        return None
-
-    try:
-        deepface = model_manager.deepface(config)
-    except Exception as exc:
-        LOGGER.warning("DeepFace unavailable; leaving face for review: %s", exc)
-        _progress(progress_callback, "DeepFace unavailable; leaving face for review")
-        return None
-
-    candidates: list[dict[str, Any]] = []
-    for row in rows:
-        candidate_crop = _read_crop_from_row(row)
-        if candidate_crop is None:
-            continue
-        verify_kwargs = {
-            "img1_path": face_crop,
-            "img2_path": candidate_crop,
-            "model_name": config.deepface_model_name,
-            "distance_metric": config.face_distance_metric,
-            "enforce_detection": config.deepface_enforce_detection,
-            "detector_backend": config.deepface_detector_backend,
-        }
-        try:
-            try:
-                result = deepface.verify(**verify_kwargs, silent=True)
-            except TypeError:
-                result = deepface.verify(**verify_kwargs)
-        except Exception as exc:
-            LOGGER.debug("DeepFace comparison failed for row %s: %s", row["id"], exc)
-            continue
-        if not isinstance(result, dict):
-            continue
-        try:
-            distance = float(result["distance"])
-            threshold = float(result["threshold"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if not bool(result.get("verified")):
-            continue
-        if distance > threshold * config.face_match_threshold_multiplier:
-            LOGGER.debug(
-                "DeepFace match rejected as weak for row %s: distance=%.4f threshold=%.4f",
-                row["id"],
-                distance,
-                threshold,
-            )
-            continue
-        candidates.append(
-            {
-                "id": int(row["id"]),
-                "custom_name": str(row["custom_name"] or ""),
-                "distance": distance,
-                "threshold": threshold,
-            }
-        )
-
-    best = _select_confident_face_match(candidates, config)
-    if best is None:
-        _progress(progress_callback, "No confident DeepFace match; leaving face for review")
-        return None
-
-    LOGGER.info(
-        "DeepFace matched face to row %s (%s) with distance %.4f",
-        best["id"],
-        best["custom_name"],
-        best["distance"],
-    )
-    return int(best["id"])
+    _progress(progress_callback, "No confident InsightFace match; leaving face for review")
+    return None
 
 
 def _find_vehicle_by_registration(
@@ -2311,7 +1993,6 @@ __all__ = [
     "COCO_VEHICLE_CLASSES",
     "DATASET_DIR",
     "DB_PATH",
-    "DEEPFACE_MODEL_ENV",
     "DetectionRuntimeState",
     "EASYOCR_GPU_ENV",
     "FACE_MODEL_ENV",

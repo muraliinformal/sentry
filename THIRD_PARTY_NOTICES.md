@@ -28,9 +28,6 @@ including but not limited to:
 | EasyOCR | 1.7.2 | Apache License 2.0 |
 | InsightFace | 1.0.1 | Review upstream package/model terms |
 | ONNX Runtime | 1.19.2 | MIT License |
-| DeepFace | 0.0.100 | MIT |
-| TensorFlow | 2.20.0 | Apache 2.0 |
-| TF-Keras | 2.20.1 | Apache 2.0 |
 | PyTorch | 2.8.0 | BSD-3-Clause |
 | TorchVision | 0.23.0 | BSD |
 | Pandas | 2.3.3 | BSD 3-Clause License |
@@ -54,8 +51,6 @@ Known local model paths used by the application/container workflow include:
 
 - `models/*.pt` for YOLO detector checkpoints
 - `insightface_models/models/buffalo_l/*.onnx` for InsightFace Buffalo_L assets
-- `.deepface_home/.deepface/weights/*.h5` for DeepFace fallback models such as
-  VGG-Face
 
 These model files may have license terms that differ from the loader libraries.
 Some model licenses may restrict redistribution, commercial use, biometric/face

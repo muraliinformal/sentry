@@ -11,10 +11,7 @@ __pycache__/
 .git/
 .agents/
 .codex/
-.deepface_home/*
-!.deepface_home/.deepface/
-!.deepface_home/.deepface/weights/
-!.deepface_home/.deepface/weights/*
+.deepface_home/
 .matplotlib_cache/
 *.tar
 *.tar.gz

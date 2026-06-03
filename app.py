@@ -136,14 +136,12 @@ def _drain_status_queue() -> None:
 def _build_pipeline_config(
     vehicle_model_path: str,
     face_model_path: str,
-    deepface_model_name: str,
     *,
     show_errors: bool = False,
 ) -> pipeline.PipelineConfig | None:
     base_config = pipeline.PipelineConfig.with_model_paths(
         vehicle_model_path=vehicle_model_path.strip() or None,
         face_model_path=face_model_path.strip() or None,
-        deepface_model_name=deepface_model_name.strip() or None,
     )
     if base_config.vehicle_model_path is None:
         if show_errors:
@@ -242,16 +240,13 @@ def _render_sidebar() -> None:
     default_config = pipeline.PipelineConfig()
     detected_vehicle_model_path = str(default_config.vehicle_model_path or "")
     detected_face_model_path = str(default_config.face_model_path or "")
-    detected_deepface_model_name = default_config.deepface_model_name
     st.session_state.setdefault("vehicle_model_path_input", detected_vehicle_model_path)
     st.session_state.setdefault("face_model_path_input", detected_face_model_path)
-    st.session_state.setdefault("deepface_model_name_input", detected_deepface_model_name)
 
     with st.sidebar.expander("Model Paths", expanded=True):
         if st.button("Use Detected Models", use_container_width=True):
             st.session_state.vehicle_model_path_input = detected_vehicle_model_path
             st.session_state.face_model_path_input = detected_face_model_path
-            st.session_state.deepface_model_name_input = detected_deepface_model_name
             _rerun()
 
         vehicle_model_path = st.text_input(
@@ -262,11 +257,7 @@ def _render_sidebar() -> None:
             "Face YOLO model",
             key="face_model_path_input",
         )
-        deepface_model_name = st.text_input(
-            "DeepFace model",
-            key="deepface_model_name_input",
-        )
-        st.caption("Face recognition uses InsightFace buffalo_l automatically when available; DeepFace is fallback.")
+        st.caption("Face recognition uses InsightFace buffalo_l embeddings when available.")
 
     running = _is_processing()
     button_label = "Stop Processing" if running else "Start Processing"
@@ -277,7 +268,6 @@ def _render_sidebar() -> None:
             config = _build_pipeline_config(
                 vehicle_model_path,
                 face_model_path,
-                deepface_model_name,
                 show_errors=True,
             )
         _start_or_stop_processing(
