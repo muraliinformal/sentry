@@ -1,0 +1,15 @@
+# Copyright 2026 Sentry Object Intelligence contributors
+# SPDX-License-Identifier: Apache-2.0
+
+streamlit==1.50.0
+ultralytics==8.4.60
+opencv-python-headless==4.13.0.92
+numpy==2.0.2
+easyocr==1.7.2
+insightface==1.0.1
+onnxruntime==1.19.2
+deepface==0.0.100
+tensorflow==2.20.0
+tf-keras==2.20.1
+pandas==2.3.3
+pillow==11.3.0

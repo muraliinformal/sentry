@@ -1,0 +1,10 @@
+Sentry Object Intelligence - Third-Party Notice
+
+This file is provided for compatibility with requests for a THIRDPART_NOTICE
+artifact. The canonical third-party notice file for this repository is:
+
+    THIRD_PARTY_NOTICES.md
+
+That file summarizes dependency, model-weight, container-distribution, and
+biometric/privacy notices. It does not replace the license texts or terms
+provided by upstream projects, package maintainers, or model authors.

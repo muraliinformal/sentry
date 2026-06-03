@@ -1,0 +1,38 @@
+# Copyright 2026 Sentry Object Intelligence contributors
+# SPDX-License-Identifier: Apache-2.0
+
+dataset/
+tracking_database.db
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.pyc
+.git/
+.agents/
+.codex/
+.deepface_home/*
+!.deepface_home/.deepface/
+!.deepface_home/.deepface/weights/
+!.deepface_home/.deepface/weights/*
+.matplotlib_cache/
+*.tar
+*.tar.gz
+*.tgz
+*.log
+
+# Never bake source/captured media into the container image.
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+*.webp
+*.tif
+*.tiff
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.m4v
+*.webm

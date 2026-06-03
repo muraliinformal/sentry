@@ -1,0 +1,65 @@
+# Copyright 2026 Sentry Object Intelligence contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local environment/secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Runtime application data - do not publish captured media or databases
+dataset/
+tracking_database.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated container archives/images
+sentry-object-intelligence.tar
+*.tar
+*.tar.gz
+*.tgz
+
+# Local model weights - users must provide/download these under their own licenses
+models/*
+!models/.gitkeep
+insightface_models/*
+!insightface_models/.gitkeep
+.deepface_home/*
+!.deepface_home/.deepface/
+.deepface_home/.deepface/*
+!.deepface_home/.deepface/weights/
+.deepface_home/.deepface/weights/*
+!.deepface_home/.deepface/weights/.gitkeep
+
+# Local caches/logs
+.matplotlib_cache/
+.agents/
+.codex/
+*.log
+
+# Common local media inputs/outputs
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+*.webp
+*.tif
+*.tiff
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.m4v
+*.webm
